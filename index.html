@@ -132,6 +132,28 @@
         border: 1px solid #444;
         margin-right: 10px;
       }
+      /* Character counter styling */
+      #charCounter {
+        float: right;
+        color: #888;
+        font-size: 0.9rem;
+        margin-top: 5px;
+      }
+      /* Output container to hold both the output and counter */
+      .output-container {
+        position: relative;
+      }
+      /* Line character count styling */
+      .line-char-count {
+        color: #666;
+        font-size: 0.8rem;
+        display: inline-block;
+        margin-left: 10px;
+        user-select: none;
+        white-space: nowrap;
+        position: absolute;
+        right: 10px;
+      }
     </style>
   </head>
   <body>
@@ -202,6 +224,17 @@
         </div>
         <br />
 
+        <!-- Pattern Selection -->
+        <div>
+          <label for="patternSelect">Pattern:</label>
+          <select id="patternSelect">
+            <option value="original">Original</option>
+            <option value="distributed">Distributed</option>
+            <option value="symmetrical">Symmetrical</option>
+          </select>
+        </div>
+        <br />
+
         <!-- Toggle button for Custom Gradient -->
         <div>
           <input type="button" id="toggleCustomGradientButton" value="Create custom gradient" />
@@ -254,19 +287,14 @@
         </div>
         <br />
 
-        <!-- Pattern Selection -->
-        <div>
-          <label for="patternSelect">Pattern:</label>
-          <select id="patternSelect">
-            <option value="original">Original</option>
-            <option value="distributed">Distributed</option>
-            <option value="symmetrical">Symmetrical</option>
-          </select>
-        </div>
+        <!-- Pattern Selection - Removed from here -->
       </div>
     </div>
 
-    <div id="output"></div>
+    <div class="output-container">
+      <div id="output"></div>
+      <div id="charCounter">Character count per line →</div>
+    </div>
 
     <script>
       // Standard 16 color mapping
@@ -373,6 +401,9 @@
       function renderXterm(text) {
         let output = "";
         let currentColor = "#ffffff";
+        let lineCharCount = 0;
+        let lines = [];
+        let currentLine = "";
 
         text.replace(regex, (match, colorCode, textContent) => {
           if (colorCode) {
@@ -439,13 +470,31 @@
               currentColor = standardColorMap[c] || "#ffffff";
             }
           } else if (textContent) {
-            if (/\s/.test(textContent)) {
-              output += escapeHtml(textContent);
+            if (textContent === "\n") {
+              lines.push({ content: currentLine, count: lineCharCount });
+              currentLine = "";
+              lineCharCount = 0;
             } else {
-              output += `<span style="color: ${currentColor}">${escapeHtml(textContent)}</span>`;
+              if (/\s/.test(textContent)) {
+                currentLine += escapeHtml(textContent);
+              } else {
+                currentLine += `<span style="color: ${currentColor}">${escapeHtml(textContent)}</span>`;
+              }
+              lineCharCount++;
             }
           }
         });
+        
+        // Add the last line if it has content
+        if (currentLine) {
+          lines.push({ content: currentLine, count: lineCharCount });
+        }
+        
+        // Build the output with line character counts
+        lines.forEach(line => {
+          output += `<div style="position: relative; padding-right: 40px;">${line.content}<span class="line-char-count">${line.count}</span></div>`;
+        });
+        
         return output;
       }
 
@@ -694,6 +743,13 @@
       function updateOutput() {
         const text = document.getElementById("textInput").value;
         document.getElementById("output").innerHTML = renderXterm(text);
+        
+        // Update character counter
+        const plainText = text.replace(
+          /\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3}/g,
+          ""
+        );
+        document.getElementById("charCounter").textContent = `Total Characters: ${plainText.length}`;
       }
 
       function updateFont() {
