@@ -323,6 +323,16 @@
       <div id="charCounter">Character count per line →</div>
     </div>
 
+    <div style="margin-top: 20px;">
+      <label for="copyableOutput">Copyable Text with Color Codes:</label><br />
+      <textarea 
+        id="copyableOutput" 
+        style="width: 100%; height: 150px; background-color: #111; color: white; border: 1px solid #444; padding: 10px; font-family: inherit; resize: vertical;" 
+        readonly
+        placeholder="Color-coded text will appear here..."
+      ></textarea>
+    </div>
+
     <script>
       // Standard 16 color mapping
       const standardColorMap = {
@@ -745,39 +755,6 @@
         return result;
       }
 
-      function calculateAdjustedCursorPosition(plainText, coloredText, originalCursorPos) {
-        // If cursor was at the beginning, keep it there
-        if (originalCursorPos === 0) return 0;
-        
-        // If cursor is past the end of plain text, it should be at the end of colored text
-        if (originalCursorPos >= plainText.length) {
-          return coloredText.length;
-        }
-        
-        // Count how many plain characters we need to pass to reach the cursor position
-        let plainCharCount = originalCursorPos;
-        
-        // Now find where this position maps to in the colored text
-        let coloredPos = 0;
-        let foundChars = 0;
-        
-        while (coloredPos < coloredText.length && foundChars < plainCharCount) {
-          // Check if we're at a color code
-          const remaining = coloredText.slice(coloredPos);
-          const colorMatch = remaining.match(/^(\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3})/);
-          
-          if (colorMatch) {
-            // Skip color code
-            coloredPos += colorMatch[0].length;
-          } else {
-            // Count regular character (including spaces)
-            foundChars++;
-            coloredPos++;
-          }
-        }
-        
-        return coloredPos;
-      }
 
       function formatText(text) {
         const wrapLimit = parseInt(document.getElementById("wrapLimit").value) || 80;
@@ -856,6 +833,7 @@
 
       function applyGradient() {
         const textInput = document.getElementById("textInput");
+        const copyableOutput = document.getElementById("copyableOutput");
         const text = originalText;
         const pattern = document.getElementById("patternSelect").value;
         const select = document.getElementById("gradientSelect");
@@ -873,36 +851,28 @@
           gradientText = applySymmetricalPattern(text, colors);
         }
         
+        // Keep the input clean, put colored text in copyable output
+        textInput.value = text;
+        copyableOutput.value = gradientText;
         
-        // Use saved cursor position if available (from onTextInput), otherwise current position
-        const cursorPos = window.savedPlainCursorPos !== undefined ? window.savedPlainCursorPos : textInput.selectionStart;
-        
-        // Calculate adjusted cursor position
-        const adjustedCursorPos = calculateAdjustedCursorPosition(text, gradientText, cursorPos);
-        
-        textInput.value = gradientText;
-        
-        // Restore cursor position
-        textInput.setSelectionRange(adjustedCursorPos, adjustedCursorPos);
-        
-        // Clear saved position
-        window.savedPlainCursorPos = undefined;
+        // Restore cursor position if we have one saved
+        if (window.savedPlainCursorPos !== undefined) {
+          textInput.setSelectionRange(window.savedPlainCursorPos, window.savedPlainCursorPos);
+          window.savedPlainCursorPos = undefined;
+        }
         
         originalText = text;
-        updateOutput();
+        updateOutput(gradientText);
       }
 
-      function updateOutput() {
-        const text = document.getElementById("textInput").value;
-        document.getElementById("output").innerHTML = renderXterm(text);
+      function updateOutput(coloredText) {
+        // Use colored text if provided, otherwise get from copyable output
+        const textToRender = coloredText || document.getElementById("copyableOutput").value || document.getElementById("textInput").value;
+        document.getElementById("output").innerHTML = renderXterm(textToRender);
         
-        // Update character counter
-        const plainText = text.replace(
-          /\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3}/g,
-          ""
-        );
-        document.getElementById("charCounter").textContent = `Total Characters: ${plainText.length}`;
-        
+        // Update character counter based on clean text
+        const cleanText = document.getElementById("textInput").value;
+        document.getElementById("charCounter").textContent = `Total Characters: ${cleanText.length}`;
       }
 
       function updateFont() {
@@ -1257,31 +1227,66 @@
         applyGradient();
       }
 
+      function onTextPaste(event) {
+        // Get the pasted text from clipboard
+        const pastedText = (event.clipboardData || window.clipboardData).getData('text');
+        
+        // Check if the pasted text has color codes
+        const hasColorCodes = /\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3}/.test(pastedText);
+        
+        if (hasColorCodes) {
+          // Prevent default paste behavior
+          event.preventDefault();
+          
+          // Strip color codes for the input box (clean text for editing)
+          const cleanText = pastedText.replace(
+            /\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3}/g,
+            ""
+          );
+          
+          // Get cursor position and insert clean text
+          const textInput = document.getElementById("textInput");
+          const startPos = textInput.selectionStart;
+          const endPos = textInput.selectionEnd;
+          const currentValue = textInput.value;
+          
+          // Insert clean text at cursor position
+          const newValue = currentValue.substring(0, startPos) + cleanText + currentValue.substring(endPos);
+          textInput.value = newValue;
+          
+          // Set cursor position after inserted text
+          const newCursorPos = startPos + cleanText.length;
+          textInput.setSelectionRange(newCursorPos, newCursorPos);
+          
+          // Put original colored text in copyable output
+          document.getElementById("copyableOutput").value = pastedText;
+          
+          // Update the preview with the colored text
+          updateOutput(pastedText);
+          
+          // Update originalText for edit mode
+          originalText = newValue;
+        }
+        // If no color codes, let the normal paste happen and onTextInput will handle it
+      }
+
       function onTextInput(event) {
         const mode = getSelectedMode();
         const textInput = document.getElementById("textInput");
-        let text = textInput.value;
+        const text = textInput.value;
         const cursorPos = textInput.selectionStart;
         
         if (mode === "edit") {
-          // Calculate where we are in the plain text
-          let plainTextBeforeCursor = text.substring(0, cursorPos).replace(
-            /\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3}/g,
-            ""
-          );
-          const plainCursorPos = plainTextBeforeCursor.length;
+          // Text is already clean, just store it
+          originalText = text;
           
-          let plain = text.replace(
-            /\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3}/g,
-            ""
-          );
-          originalText = plain;
-          
-          // Store the plain cursor position to restore after gradient
-          window.savedPlainCursorPos = plainCursorPos;
+          // Store the cursor position to restore after gradient
+          window.savedPlainCursorPos = cursorPos;
           
           applyGradient();
         } else {
+          // In viewer mode, update copyable output and preview
+          document.getElementById("copyableOutput").value = text;
           updateOutput();
         }
       }
@@ -1561,6 +1566,7 @@
 
       document.getElementById("fontSelector").addEventListener("change", updateFont);
       document.getElementById("textInput").addEventListener("input", onTextInput);
+      document.getElementById("textInput").addEventListener("paste", onTextPaste);
       document.getElementById("gradientSelect").addEventListener("change", onGradientChange);
       document.getElementById("patternSelect").addEventListener("change", onPatternChange);
       document.getElementById("invertGradient").addEventListener("change", onGradientChange);
@@ -1572,13 +1578,12 @@
         textInput.value = formattedText;
         
         if (getSelectedMode() === "edit") {
-          // Update original text with the formatted version (without color codes)
-          originalText = formattedText.replace(
-            /\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3}/g,
-            ""
-          );
+          // Update original text with the formatted clean text
+          originalText = formattedText;
           applyGradient();
         } else {
+          // In viewer mode, also update copyable output
+          document.getElementById("copyableOutput").value = formattedText;
           updateOutput();
         }
       });
