@@ -256,6 +256,14 @@
             style="width: 60px; background-color: #111; color: white; border: 1px solid #444; padding: 5px; font-family: inherit;"
             disabled
           />
+          &nbsp;&nbsp;
+          <button
+            id="formatButton"
+            style="background-color: #111; color: white; border: 1px solid #444; padding: 5px 10px; font-family: inherit; cursor: pointer;"
+            disabled
+          >
+            Format
+          </button>
         </div>
         <br />
 
@@ -749,8 +757,13 @@
         // If cursor was at the beginning, keep it there
         if (originalCursorPos === 0) return 0;
         
+        // If cursor is past the end of plain text, it should be at the end of colored text
+        if (originalCursorPos >= plainText.length) {
+          return coloredText.length;
+        }
+        
         // Count how many plain characters we need to pass to reach the cursor position
-        let plainCharCount = Math.min(originalCursorPos, plainText.length);
+        let plainCharCount = originalCursorPos;
         
         // Now find where this position maps to in the colored text
         let coloredPos = 0;
@@ -765,7 +778,7 @@
             // Skip color code
             coloredPos += colorMatch[0].length;
           } else {
-            // Count regular character
+            // Count regular character (including spaces)
             foundChars++;
             coloredPos++;
           }
@@ -774,82 +787,137 @@
         return coloredPos;
       }
 
+      function formatText(text) {
+        const wrapLimit = parseInt(document.getElementById("wrapLimit").value) || 80;
+        
+        // First, extract all words from the entire text (merging lines)
+        const allWords = [];
+        let currentWord = "";
+        let i = 0;
+        
+        // Replace newlines with spaces to merge lines
+        const mergedText = text.replace(/\n+/g, ' ');
+        
+        while (i < mergedText.length) {
+          const remaining = mergedText.slice(i);
+          const colorMatch = remaining.match(/^(\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3})/);
+          
+          if (colorMatch) {
+            currentWord += colorMatch[0];
+            i += colorMatch[0].length;
+          } else {
+            const char = mergedText[i];
+            if (char === ' ') {
+              if (currentWord) {
+                allWords.push(currentWord);
+                currentWord = "";
+              }
+            } else {
+              currentWord += char;
+            }
+            i++;
+          }
+        }
+        
+        // Don't forget the last word
+        if (currentWord) {
+          allWords.push(currentWord);
+        }
+        
+        // Now reflow all words into properly formatted lines
+        const formattedLines = [];
+        let currentLine = "";
+        let currentLineLength = 0;
+        
+        allWords.forEach((word) => {
+          // Calculate visible length of word
+          const visibleWord = word.replace(
+            /\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3}/g,
+            ""
+          );
+          const wordLength = visibleWord.length;
+          
+          if (currentLineLength === 0) {
+            // First word on line
+            currentLine = word;
+            currentLineLength = wordLength;
+          } else if (currentLineLength + 1 + wordLength <= wrapLimit) {
+            // Word fits on current line with space
+            currentLine += " " + word;
+            currentLineLength += 1 + wordLength;
+          } else {
+            // Word doesn't fit, start new line
+            formattedLines.push(currentLine);
+            currentLine = word;
+            currentLineLength = wordLength;
+          }
+        });
+        
+        // Add the last line
+        if (currentLine) {
+          formattedLines.push(currentLine);
+        }
+        
+        return formattedLines.join('\n');
+      }
+
       function applyAutoWrap(text) {
         const autoWrap = document.getElementById("autoWrapToggle").checked;
         const wrapLimit = parseInt(document.getElementById("wrapLimit").value) || 80;
         
         if (!autoWrap) return text;
         
+        // Don't wrap if we're in the middle of typing
+        if (window.isTyping) return text;
+        
         // Split text into lines
         const lines = text.split('\n');
         const wrappedLines = [];
         
         lines.forEach(line => {
-          let currentLine = "";
-          let currentWord = "";
-          let lineCharCount = 0;
-          let wordCharCount = 0;
-          let i = 0;
+          // Count visible characters in this line
+          const visibleText = line.replace(
+            /\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3}/g,
+            ""
+          );
           
-          while (i < line.length) {
-            // Check if we're at a color code
+          // If line is short enough, keep it as-is
+          if (visibleText.length <= wrapLimit) {
+            wrappedLines.push(line);
+            return;
+          }
+          
+          // Line needs wrapping - find last space before limit
+          let i = 0;
+          let visibleCount = 0;
+          let lastSpaceIndex = -1;
+          let lastSpaceVisibleCount = 0;
+          
+          while (i < line.length && visibleCount <= wrapLimit) {
             const remaining = line.slice(i);
             const colorMatch = remaining.match(/^(\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3})/);
             
             if (colorMatch) {
-              // Add color code to current word without counting it
-              currentWord += colorMatch[0];
               i += colorMatch[0].length;
             } else {
-              const char = line[i];
-              
-              // Check if we hit a space or end of line
-              if (char === ' ' || i === line.length - 1) {
-                // Include the character in the word if it's the last character
-                if (i === line.length - 1 && char !== ' ') {
-                  currentWord += char;
-                  wordCharCount++;
-                }
-                
-                // Check if adding this word would exceed the limit
-                if (lineCharCount > 0 && lineCharCount + wordCharCount + (char === ' ' ? 1 : 0) > wrapLimit) {
-                  // Start a new line
-                  wrappedLines.push(currentLine.trim());
-                  currentLine = currentWord;
-                  lineCharCount = wordCharCount;
-                } else {
-                  // Add word to current line
-                  if (lineCharCount > 0 && char === ' ') {
-                    currentLine += ' ';
-                    lineCharCount++;
-                  }
-                  currentLine += currentWord;
-                  lineCharCount += wordCharCount;
-                }
-                
-                // Reset word
-                currentWord = "";
-                wordCharCount = 0;
-              } else {
-                // Build up the current word
-                currentWord += char;
-                wordCharCount++;
+              if (line[i] === ' ' && visibleCount < wrapLimit) {
+                lastSpaceIndex = i;
+                lastSpaceVisibleCount = visibleCount;
               }
+              visibleCount++;
               i++;
             }
           }
           
-          // Add any remaining word
-          if (currentWord) {
-            if (lineCharCount > 0 && lineCharCount + wordCharCount > wrapLimit) {
-              wrappedLines.push(currentLine.trim());
-              wrappedLines.push(currentWord);
-            } else {
-              currentLine += currentWord;
-              wrappedLines.push(currentLine.trim());
-            }
-          } else if (currentLine) {
-            wrappedLines.push(currentLine.trim());
+          // If we found a space to break at
+          if (lastSpaceIndex > -1 && lastSpaceVisibleCount > 0) {
+            wrappedLines.push(line.substring(0, lastSpaceIndex));
+            // Recursively wrap the rest
+            const remainingLines = applyAutoWrap(line.substring(lastSpaceIndex + 1));
+            wrappedLines.push(...remainingLines.split('\n'));
+          } else {
+            // No good break point, just keep the line as-is
+            wrappedLines.push(line);
           }
         });
         
@@ -1271,22 +1339,25 @@
         applyGradient();
       }
 
-      function onTextInput() {
+      function onTextInput(event) {
         const mode = getSelectedMode();
         const textInput = document.getElementById("textInput");
         let text = textInput.value;
         const cursorPos = textInput.selectionStart;
         
+        // Set typing flag
+        window.isTyping = true;
+        
         if (mode === "edit") {
           // Calculate where we are in the plain text
           let plainTextBeforeCursor = text.substring(0, cursorPos).replace(
-            /\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rKrRgGyYbBmMcCwWdD]|@[rKrRgGyYbBmMcCwWdD]|\{[rKrRgGyYbBmMcCwWdD]|\&[rKrRgGyYbBmMcCwWdD](?:\d{3})?|\&\d{3}/g,
+            /\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3}/g,
             ""
           );
           const plainCursorPos = plainTextBeforeCursor.length;
           
           let plain = text.replace(
-            /\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rKrRgGyYbBmMcCwWdD]|@[rKrRgGyYbBmMcCwWdD]|\{[rKrRgGyYbBmMcCwWdD]|\&[rKrRgGyYbBmMcCwWdD](?:\d{3})?|\&\d{3}/g,
+            /\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3}/g,
             ""
           );
           originalText = plain;
@@ -1296,11 +1367,23 @@
           
           applyGradient();
         } else {
-          // Apply auto-wrap in viewer mode too
-          text = applyAutoWrap(text);
-          textInput.value = text;
+          // Don't auto-wrap while typing in viewer mode
           updateOutput();
         }
+        
+        // Clear typing flag after a delay
+        clearTimeout(window.typingTimeout);
+        window.typingTimeout = setTimeout(() => {
+          window.isTyping = false;
+          // Apply auto-wrap after typing stops
+          if (document.getElementById("autoWrapToggle").checked) {
+            const wrappedText = applyAutoWrap(textInput.value);
+            if (wrappedText !== textInput.value) {
+              textInput.value = wrappedText;
+              updateOutput();
+            }
+          }
+        }, 500);
       }
 
       function getSelectedMode() {
@@ -1585,7 +1668,9 @@
       // Auto-wrap event listeners
       document.getElementById("autoWrapToggle").addEventListener("change", function() {
         const wrapLimitInput = document.getElementById("wrapLimit");
+        const formatButton = document.getElementById("formatButton");
         wrapLimitInput.disabled = !this.checked;
+        formatButton.disabled = !this.checked;
         if (getSelectedMode() === "edit") {
           applyGradient();
         } else {
@@ -1595,6 +1680,24 @@
 
       document.getElementById("wrapLimit").addEventListener("input", function() {
         if (getSelectedMode() === "edit" && document.getElementById("autoWrapToggle").checked) {
+          applyGradient();
+        } else {
+          updateOutput();
+        }
+      });
+
+      // Format button event listener
+      document.getElementById("formatButton").addEventListener("click", function() {
+        const textInput = document.getElementById("textInput");
+        const formattedText = formatText(textInput.value);
+        textInput.value = formattedText;
+        
+        if (getSelectedMode() === "edit") {
+          // Update original text with the formatted version (without color codes)
+          originalText = formattedText.replace(
+            /\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3}/g,
+            ""
+          );
           applyGradient();
         } else {
           updateOutput();
