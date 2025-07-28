@@ -241,12 +241,9 @@
         </div>
         <br />
 
-        <!-- Auto-wrap Controls -->
+        <!-- Format Controls -->
         <div>
-          <input type="checkbox" id="autoWrapToggle" />
-          <label for="autoWrapToggle">Auto-wrap at character limit</label>
-          &nbsp;&nbsp;
-          <label for="wrapLimit">Limit:</label>
+          <label for="wrapLimit">Format at character limit:</label>
           <input
             type="number"
             id="wrapLimit"
@@ -254,13 +251,11 @@
             max="200"
             value="80"
             style="width: 60px; background-color: #111; color: white; border: 1px solid #444; padding: 5px; font-family: inherit;"
-            disabled
           />
           &nbsp;&nbsp;
           <button
             id="formatButton"
             style="background-color: #111; color: white; border: 1px solid #444; padding: 5px 10px; font-family: inherit; cursor: pointer;"
-            disabled
           >
             Format
           </button>
@@ -523,11 +518,8 @@
         }
         
         // Build the output with line character counts
-        const wrapLimit = parseInt(document.getElementById("wrapLimit").value) || 80;
         lines.forEach(line => {
-          const overLimit = line.count > wrapLimit;
-          const countClass = overLimit ? 'line-char-count over-limit' : 'line-char-count';
-          output += `<div style="position: relative; padding-right: 40px;">${line.content}<span class="${countClass}">${line.count}</span></div>`;
+          output += `<div style="position: relative; padding-right: 40px;">${line.content}<span class="line-char-count">${line.count}</span></div>`;
         });
         
         return output;
@@ -861,68 +853,6 @@
         return formattedLines.join('\n');
       }
 
-      function applyAutoWrap(text) {
-        const autoWrap = document.getElementById("autoWrapToggle").checked;
-        const wrapLimit = parseInt(document.getElementById("wrapLimit").value) || 80;
-        
-        if (!autoWrap) return text;
-        
-        // Don't wrap if we're in the middle of typing
-        if (window.isTyping) return text;
-        
-        // Split text into lines
-        const lines = text.split('\n');
-        const wrappedLines = [];
-        
-        lines.forEach(line => {
-          // Count visible characters in this line
-          const visibleText = line.replace(
-            /\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3}/g,
-            ""
-          );
-          
-          // If line is short enough, keep it as-is
-          if (visibleText.length <= wrapLimit) {
-            wrappedLines.push(line);
-            return;
-          }
-          
-          // Line needs wrapping - find last space before limit
-          let i = 0;
-          let visibleCount = 0;
-          let lastSpaceIndex = -1;
-          let lastSpaceVisibleCount = 0;
-          
-          while (i < line.length && visibleCount <= wrapLimit) {
-            const remaining = line.slice(i);
-            const colorMatch = remaining.match(/^(\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3})/);
-            
-            if (colorMatch) {
-              i += colorMatch[0].length;
-            } else {
-              if (line[i] === ' ' && visibleCount < wrapLimit) {
-                lastSpaceIndex = i;
-                lastSpaceVisibleCount = visibleCount;
-              }
-              visibleCount++;
-              i++;
-            }
-          }
-          
-          // If we found a space to break at
-          if (lastSpaceIndex > -1 && lastSpaceVisibleCount > 0) {
-            wrappedLines.push(line.substring(0, lastSpaceIndex));
-            // Recursively wrap the rest
-            const remainingLines = applyAutoWrap(line.substring(lastSpaceIndex + 1));
-            wrappedLines.push(...remainingLines.split('\n'));
-          } else {
-            // No good break point, just keep the line as-is
-            wrappedLines.push(line);
-          }
-        });
-        
-        return wrappedLines.join('\n');
-      }
 
       function applyGradient() {
         const textInput = document.getElementById("textInput");
@@ -943,8 +873,6 @@
           gradientText = applySymmetricalPattern(text, colors);
         }
         
-        // Apply auto-wrap after gradient
-        gradientText = applyAutoWrap(gradientText);
         
         // Use saved cursor position if available (from onTextInput), otherwise current position
         const cursorPos = window.savedPlainCursorPos !== undefined ? window.savedPlainCursorPos : textInput.selectionStart;
@@ -975,16 +903,6 @@
         );
         document.getElementById("charCounter").textContent = `Total Characters: ${plainText.length}`;
         
-        // Check if any line exceeds the wrap limit
-        const wrapLimit = parseInt(document.getElementById("wrapLimit").value) || 80;
-        const lines = plainText.split('\n');
-        const hasLongLine = lines.some(line => line.length > wrapLimit);
-        
-        if (hasLongLine) {
-          document.getElementById("charCounter").classList.add("over-limit");
-        } else {
-          document.getElementById("charCounter").classList.remove("over-limit");
-        }
       }
 
       function updateFont() {
@@ -1345,9 +1263,6 @@
         let text = textInput.value;
         const cursorPos = textInput.selectionStart;
         
-        // Set typing flag
-        window.isTyping = true;
-        
         if (mode === "edit") {
           // Calculate where we are in the plain text
           let plainTextBeforeCursor = text.substring(0, cursorPos).replace(
@@ -1367,23 +1282,8 @@
           
           applyGradient();
         } else {
-          // Don't auto-wrap while typing in viewer mode
           updateOutput();
         }
-        
-        // Clear typing flag after a delay
-        clearTimeout(window.typingTimeout);
-        window.typingTimeout = setTimeout(() => {
-          window.isTyping = false;
-          // Apply auto-wrap after typing stops
-          if (document.getElementById("autoWrapToggle").checked) {
-            const wrappedText = applyAutoWrap(textInput.value);
-            if (wrappedText !== textInput.value) {
-              textInput.value = wrappedText;
-              updateOutput();
-            }
-          }
-        }, 500);
       }
 
       function getSelectedMode() {
@@ -1664,27 +1564,6 @@
       document.getElementById("gradientSelect").addEventListener("change", onGradientChange);
       document.getElementById("patternSelect").addEventListener("change", onPatternChange);
       document.getElementById("invertGradient").addEventListener("change", onGradientChange);
-
-      // Auto-wrap event listeners
-      document.getElementById("autoWrapToggle").addEventListener("change", function() {
-        const wrapLimitInput = document.getElementById("wrapLimit");
-        const formatButton = document.getElementById("formatButton");
-        wrapLimitInput.disabled = !this.checked;
-        formatButton.disabled = !this.checked;
-        if (getSelectedMode() === "edit") {
-          applyGradient();
-        } else {
-          updateOutput();
-        }
-      });
-
-      document.getElementById("wrapLimit").addEventListener("input", function() {
-        if (getSelectedMode() === "edit" && document.getElementById("autoWrapToggle").checked) {
-          applyGradient();
-        } else {
-          updateOutput();
-        }
-      });
 
       // Format button event listener
       document.getElementById("formatButton").addEventListener("click", function() {
