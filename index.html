@@ -160,6 +160,39 @@
       .line-char-count.over-limit {
         color: #ff0000;
       }
+      /* Copy button styling */
+      .copy-container {
+        position: relative;
+        display: inline-block;
+        width: 100%;
+      }
+      .copy-button {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        background-color: #333;
+        color: white;
+        border: 1px solid #555;
+        padding: 6px 12px;
+        font-family: inherit;
+        font-size: 0.85rem;
+        cursor: pointer;
+        border-radius: 4px;
+        z-index: 10;
+        transition: all 0.2s ease;
+      }
+      .copy-button:hover {
+        background-color: #444;
+        border-color: #666;
+      }
+      .copy-button:active {
+        background-color: #222;
+        transform: translateY(1px);
+      }
+      .copy-button.copied {
+        background-color: #0a5d0a;
+        border-color: #0f8f0f;
+      }
     </style>
   </head>
   <body>
@@ -325,12 +358,15 @@
 
     <div style="margin-top: 20px;">
       <label for="copyableOutput">Copyable Text with Color Codes:</label><br />
-      <textarea 
-        id="copyableOutput" 
-        style="width: 100%; height: 150px; background-color: #111; color: white; border: 1px solid #444; padding: 10px; font-family: inherit; resize: vertical;" 
-        readonly
-        placeholder="Color-coded text will appear here..."
-      ></textarea>
+      <div class="copy-container">
+        <textarea 
+          id="copyableOutput" 
+          style="width: 100%; height: 150px; background-color: #111; color: white; border: 1px solid #444; padding: 10px; font-family: inherit; resize: vertical;" 
+          readonly
+          placeholder="Color-coded text will appear here..."
+        ></textarea>
+        <button id="copyButton" class="copy-button" title="Copy to clipboard">Copy</button>
+      </div>
     </div>
 
     <script>
@@ -1585,6 +1621,42 @@
           // In viewer mode, also update copyable output
           document.getElementById("copyableOutput").value = formattedText;
           updateOutput();
+        }
+      });
+
+      // Copy button functionality
+      document.getElementById("copyButton").addEventListener("click", async function() {
+        const copyableOutput = document.getElementById("copyableOutput");
+        const copyButton = this;
+        
+        try {
+          // Use the modern Clipboard API if available
+          if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(copyableOutput.value);
+          } else {
+            // Fallback for older browsers
+            copyableOutput.select();
+            copyableOutput.setSelectionRange(0, 99999); // For mobile devices
+            document.execCommand('copy');
+            copyableOutput.setSelectionRange(0, 0); // Clear selection
+          }
+          
+          // Show feedback that copy was successful
+          copyButton.textContent = "Copied!";
+          copyButton.classList.add("copied");
+          
+          // Reset button after 2 seconds
+          setTimeout(() => {
+            copyButton.textContent = "Copy";
+            copyButton.classList.remove("copied");
+          }, 2000);
+          
+        } catch (err) {
+          // Show error feedback
+          copyButton.textContent = "Failed";
+          setTimeout(() => {
+            copyButton.textContent = "Copy";
+          }, 2000);
         }
       });
 
