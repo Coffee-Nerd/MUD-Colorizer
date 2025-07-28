@@ -139,6 +139,9 @@
         font-size: 0.9rem;
         margin-top: 5px;
       }
+      #charCounter.over-limit {
+        color: #ff0000;
+      }
       /* Output container to hold both the output and counter */
       .output-container {
         position: relative;
@@ -153,6 +156,9 @@
         white-space: nowrap;
         position: absolute;
         right: 10px;
+      }
+      .line-char-count.over-limit {
+        color: #ff0000;
       }
     </style>
   </head>
@@ -232,6 +238,24 @@
             <option value="distributed">Distributed</option>
             <option value="symmetrical">Symmetrical</option>
           </select>
+        </div>
+        <br />
+
+        <!-- Auto-wrap Controls -->
+        <div>
+          <input type="checkbox" id="autoWrapToggle" />
+          <label for="autoWrapToggle">Auto-wrap at character limit</label>
+          &nbsp;&nbsp;
+          <label for="wrapLimit">Limit:</label>
+          <input
+            type="number"
+            id="wrapLimit"
+            min="20"
+            max="200"
+            value="80"
+            style="width: 60px; background-color: #111; color: white; border: 1px solid #444; padding: 5px; font-family: inherit;"
+            disabled
+          />
         </div>
         <br />
 
@@ -491,8 +515,11 @@
         }
         
         // Build the output with line character counts
+        const wrapLimit = parseInt(document.getElementById("wrapLimit").value) || 80;
         lines.forEach(line => {
-          output += `<div style="position: relative; padding-right: 40px;">${line.content}<span class="line-char-count">${line.count}</span></div>`;
+          const overLimit = line.count > wrapLimit;
+          const countClass = overLimit ? 'line-char-count over-limit' : 'line-char-count';
+          output += `<div style="position: relative; padding-right: 40px;">${line.content}<span class="${countClass}">${line.count}</span></div>`;
         });
         
         return output;
@@ -718,7 +745,119 @@
         return result;
       }
 
+      function calculateAdjustedCursorPosition(plainText, coloredText, originalCursorPos) {
+        // If cursor was at the beginning, keep it there
+        if (originalCursorPos === 0) return 0;
+        
+        // Count how many plain characters we need to pass to reach the cursor position
+        let plainCharCount = Math.min(originalCursorPos, plainText.length);
+        
+        // Now find where this position maps to in the colored text
+        let coloredPos = 0;
+        let foundChars = 0;
+        
+        while (coloredPos < coloredText.length && foundChars < plainCharCount) {
+          // Check if we're at a color code
+          const remaining = coloredText.slice(coloredPos);
+          const colorMatch = remaining.match(/^(\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3})/);
+          
+          if (colorMatch) {
+            // Skip color code
+            coloredPos += colorMatch[0].length;
+          } else {
+            // Count regular character
+            foundChars++;
+            coloredPos++;
+          }
+        }
+        
+        return coloredPos;
+      }
+
+      function applyAutoWrap(text) {
+        const autoWrap = document.getElementById("autoWrapToggle").checked;
+        const wrapLimit = parseInt(document.getElementById("wrapLimit").value) || 80;
+        
+        if (!autoWrap) return text;
+        
+        // Split text into lines
+        const lines = text.split('\n');
+        const wrappedLines = [];
+        
+        lines.forEach(line => {
+          let currentLine = "";
+          let currentWord = "";
+          let lineCharCount = 0;
+          let wordCharCount = 0;
+          let i = 0;
+          
+          while (i < line.length) {
+            // Check if we're at a color code
+            const remaining = line.slice(i);
+            const colorMatch = remaining.match(/^(\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3})/);
+            
+            if (colorMatch) {
+              // Add color code to current word without counting it
+              currentWord += colorMatch[0];
+              i += colorMatch[0].length;
+            } else {
+              const char = line[i];
+              
+              // Check if we hit a space or end of line
+              if (char === ' ' || i === line.length - 1) {
+                // Include the character in the word if it's the last character
+                if (i === line.length - 1 && char !== ' ') {
+                  currentWord += char;
+                  wordCharCount++;
+                }
+                
+                // Check if adding this word would exceed the limit
+                if (lineCharCount > 0 && lineCharCount + wordCharCount + (char === ' ' ? 1 : 0) > wrapLimit) {
+                  // Start a new line
+                  wrappedLines.push(currentLine.trim());
+                  currentLine = currentWord;
+                  lineCharCount = wordCharCount;
+                } else {
+                  // Add word to current line
+                  if (lineCharCount > 0 && char === ' ') {
+                    currentLine += ' ';
+                    lineCharCount++;
+                  }
+                  currentLine += currentWord;
+                  lineCharCount += wordCharCount;
+                }
+                
+                // Reset word
+                currentWord = "";
+                wordCharCount = 0;
+              } else {
+                // Build up the current word
+                currentWord += char;
+                wordCharCount++;
+              }
+              i++;
+            }
+          }
+          
+          // Add any remaining word
+          if (currentWord) {
+            if (lineCharCount > 0 && lineCharCount + wordCharCount > wrapLimit) {
+              wrappedLines.push(currentLine.trim());
+              wrappedLines.push(currentWord);
+            } else {
+              currentLine += currentWord;
+              wrappedLines.push(currentLine.trim());
+            }
+          } else if (currentLine) {
+            wrappedLines.push(currentLine.trim());
+          }
+        });
+        
+        return wrappedLines.join('\n');
+      }
+
       function applyGradient() {
+        const textInput = document.getElementById("textInput");
         const text = originalText;
         const pattern = document.getElementById("patternSelect").value;
         const select = document.getElementById("gradientSelect");
@@ -735,7 +874,24 @@
         } else if (pattern === "symmetrical") {
           gradientText = applySymmetricalPattern(text, colors);
         }
-        document.getElementById("textInput").value = gradientText;
+        
+        // Apply auto-wrap after gradient
+        gradientText = applyAutoWrap(gradientText);
+        
+        // Use saved cursor position if available (from onTextInput), otherwise current position
+        const cursorPos = window.savedPlainCursorPos !== undefined ? window.savedPlainCursorPos : textInput.selectionStart;
+        
+        // Calculate adjusted cursor position
+        const adjustedCursorPos = calculateAdjustedCursorPosition(text, gradientText, cursorPos);
+        
+        textInput.value = gradientText;
+        
+        // Restore cursor position
+        textInput.setSelectionRange(adjustedCursorPos, adjustedCursorPos);
+        
+        // Clear saved position
+        window.savedPlainCursorPos = undefined;
+        
         originalText = text;
         updateOutput();
       }
@@ -750,6 +906,17 @@
           ""
         );
         document.getElementById("charCounter").textContent = `Total Characters: ${plainText.length}`;
+        
+        // Check if any line exceeds the wrap limit
+        const wrapLimit = parseInt(document.getElementById("wrapLimit").value) || 80;
+        const lines = plainText.split('\n');
+        const hasLongLine = lines.some(line => line.length > wrapLimit);
+        
+        if (hasLongLine) {
+          document.getElementById("charCounter").classList.add("over-limit");
+        } else {
+          document.getElementById("charCounter").classList.remove("over-limit");
+        }
       }
 
       function updateFont() {
@@ -826,6 +993,7 @@
 
       // --- Built-in and Custom Gradients ---
       const builtInGradients = [
+        { name: "Pastelbow", colors: [226, 190, 119, 84, 50, 51, 45, 69, 99, 165, 201, 200, 205, 204, 209, 215, 220] },
         { name: "Rainbow", colors: [196, 208, 226, 46, 51, 87] },
         { name: "Fire", colors: [208, 166, 124, 94, 95, 167] },
         { name: "Ocean", colors: [59, 95, 131, 167, 209, 215] },
@@ -1105,15 +1273,32 @@
 
       function onTextInput() {
         const mode = getSelectedMode();
-        const text = document.getElementById("textInput").value;
+        const textInput = document.getElementById("textInput");
+        let text = textInput.value;
+        const cursorPos = textInput.selectionStart;
+        
         if (mode === "edit") {
+          // Calculate where we are in the plain text
+          let plainTextBeforeCursor = text.substring(0, cursorPos).replace(
+            /\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rKrRgGyYbBmMcCwWdD]|@[rKrRgGyYbBmMcCwWdD]|\{[rKrRgGyYbBmMcCwWdD]|\&[rKrRgGyYbBmMcCwWdD](?:\d{3})?|\&\d{3}/g,
+            ""
+          );
+          const plainCursorPos = plainTextBeforeCursor.length;
+          
           let plain = text.replace(
             /\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rKrRgGyYbBmMcCwWdD]|@[rKrRgGyYbBmMcCwWdD]|\{[rKrRgGyYbBmMcCwWdD]|\&[rKrRgGyYbBmMcCwWdD](?:\d{3})?|\&\d{3}/g,
             ""
           );
           originalText = plain;
+          
+          // Store the plain cursor position to restore after gradient
+          window.savedPlainCursorPos = plainCursorPos;
+          
           applyGradient();
         } else {
+          // Apply auto-wrap in viewer mode too
+          text = applyAutoWrap(text);
+          textInput.value = text;
           updateOutput();
         }
       }
@@ -1396,6 +1581,25 @@
       document.getElementById("gradientSelect").addEventListener("change", onGradientChange);
       document.getElementById("patternSelect").addEventListener("change", onPatternChange);
       document.getElementById("invertGradient").addEventListener("change", onGradientChange);
+
+      // Auto-wrap event listeners
+      document.getElementById("autoWrapToggle").addEventListener("change", function() {
+        const wrapLimitInput = document.getElementById("wrapLimit");
+        wrapLimitInput.disabled = !this.checked;
+        if (getSelectedMode() === "edit") {
+          applyGradient();
+        } else {
+          updateOutput();
+        }
+      });
+
+      document.getElementById("wrapLimit").addEventListener("input", function() {
+        if (getSelectedMode() === "edit" && document.getElementById("autoWrapToggle").checked) {
+          applyGradient();
+        } else {
+          updateOutput();
+        }
+      });
 
       initialize();
     </script>
