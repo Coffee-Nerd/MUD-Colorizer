@@ -1264,6 +1264,13 @@
       }
 
       function onTextPaste(event) {
+        const mode = getSelectedMode();
+        
+        if (mode === "view") {
+          // In viewer mode, let the paste happen normally - don't interfere
+          return;
+        }
+        
         // Get the pasted text from clipboard
         const pastedText = (event.clipboardData || window.clipboardData).getData('text');
         
@@ -1294,14 +1301,11 @@
           const newCursorPos = startPos + cleanText.length;
           textInput.setSelectionRange(newCursorPos, newCursorPos);
           
-          // Put original colored text in copyable output
-          document.getElementById("copyableOutput").value = pastedText;
-          
-          // Update the preview with the colored text
-          updateOutput(pastedText);
-          
           // Update originalText for edit mode
           originalText = newValue;
+          
+          // Apply gradient to the updated text (this will properly update both preview and copyable output)
+          applyGradient();
         }
         // If no color codes, let the normal paste happen and onTextInput will handle it
       }
