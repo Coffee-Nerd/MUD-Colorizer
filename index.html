@@ -17,6 +17,8 @@
       }
       #output {
         white-space: pre-wrap;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
         margin-top: 20px;
         border: 1px solid #444;
         padding: 10px;
@@ -132,6 +134,24 @@
         border: 1px solid #444;
         margin-right: 10px;
       }
+      /* Brightness adjustment controls */
+      .brightness-controls {
+        display: flex;
+        align-items: center;
+        margin-top: 10px;
+        padding: 10px;
+        border: 1px solid #444;
+        background-color: #1a1a1a;
+      }
+      .brightness-slider {
+        width: 200px;
+        margin: 0 10px;
+      }
+      .brightness-value {
+        width: 50px;
+        text-align: center;
+        color: #888;
+      }
       /* Character counter styling */
       #charCounter {
         float: right;
@@ -242,6 +262,10 @@
           <option value="^[F">Xterm F-colors: ^[FNNN]</option>
           <option value="\t">Xterm Builder F-colors: \t[FNNN]</option>
           <option value="&amp;">Xterm: &amp;NNN</option>
+          <option value="ansi-shell">ANSI Shell: \\033[...m (for echo -e)</option>
+          <option value="ansi-rust">ANSI Rust: \\x1B[...m</option>
+          <option value="ansi-lua">ANSI Lua: \\27[...m</option>
+          <option value="ansi-c">ANSI C/Java: \\033[...m</option>
         </select>
       </div>
       <br />
@@ -271,6 +295,10 @@
             <option value="distributed">Distributed</option>
             <option value="symmetrical">Symmetrical</option>
           </select>
+          &nbsp;&nbsp;&nbsp;&nbsp;
+          <button id="instantLighterButton" style="background-color: #111; color: white; border: 1px solid #444; padding: 5px 10px; font-family: inherit; cursor: pointer;" title="Make colors 5% lighter. Note: For xterm colors, adjustments may not be perfectly reversible due to palette limitations. Truecolor ($X) format preserves full precision.">Lighter</button>
+          &nbsp;
+          <button id="instantDarkerButton" style="background-color: #111; color: white; border: 1px solid #444; padding: 5px 10px; font-family: inherit; cursor: pointer;" title="Make colors 5% darker. Note: For xterm colors, adjustments may not be perfectly reversible due to palette limitations. Truecolor ($X) format preserves full precision.">Darker</button>
         </div>
         <br />
 
@@ -298,6 +326,10 @@
         <!-- Toggle button for Custom Gradient -->
         <div>
           <input type="button" id="toggleCustomGradientButton" value="Create custom gradient" />
+          &nbsp;&nbsp;
+          <input type="button" id="randomGradientButton" value="Generate random truecolor gradient" style="background-color: #111; color: white; border: 1px solid #444; padding: 5px 10px; font-family: inherit; cursor: pointer;" />
+          &nbsp;&nbsp;
+          <input type="button" id="saveRandomGradientButton" value="Save generated gradient" style="background-color: #111; color: white; border: 1px solid #444; padding: 5px 10px; font-family: inherit; cursor: pointer; display: none;" />
         </div>
         <br />
 
@@ -357,7 +389,11 @@
     </div>
 
     <div style="margin-top: 20px;">
-      <label for="copyableOutput">Copyable Text with Color Codes:</label><br />
+      <label for="copyableOutput">Copyable Text with Color Codes:</label>
+      <span id="ansiHelp" style="display: none; color: #888; font-size: 0.85rem; margin-left: 10px;">
+        (Use with echo -e or printf in terminal)
+      </span>
+      <br />
       <div class="copy-container">
         <textarea 
           id="copyableOutput" 
@@ -466,11 +502,6 @@
         return xtermToRgbHex(colorIndex);
       }
 
-      // This regex will match any valid color code token in group1,
-      // and if not a valid token, it will match any single character (including $, @, {, &)
-      // in group2.
-      const regex = /(\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3})|([\s\S])/g;
-
       function renderXterm(text) {
         let output = "";
         let currentColor = "#ffffff";
@@ -478,9 +509,41 @@
         let lines = [];
         let currentLine = "";
 
-        text.replace(regex, (match, colorCode, textContent) => {
+        // Extended regex to also match ANSI escape sequences (all formats: \x1b, \u001b, \\033, \\x1B, \\27)
+        const renderRegex = /((?:\x1b|\u001b|\\033|\\x1B|\\27)\[(?:0|3[0-7]|9[0-7]|38;5;\d{1,3}|38;2;\d{1,3};\d{1,3};\d{1,3})m|\$X[0-9a-fA-F]{6}|\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3})|([\s\S])/g;
+
+        text.replace(renderRegex, (match, colorCode, textContent) => {
           if (colorCode) {
-            if (
+            if (colorCode.startsWith("\x1b[") || colorCode.startsWith("\u001b[") || colorCode.includes("\\033[") || colorCode.includes("\\x1B[") || colorCode.includes("\\27[")) {
+              // Handle ANSI escape codes
+              if (colorCode === "\x1b[0m" || colorCode === "\u001b[0m" || colorCode === "\\033[0m" || colorCode === "\\x1B[0m" || colorCode === "\\27[0m") {
+                currentColor = "#ffffff"; // Reset
+              } else if (colorCode.match(/(?:\x1b|\u001b|\\033|\\x1B|\\27)\[3[0-7]m/)) {
+                // Standard colors (30-37)
+                const colorNum = parseInt(colorCode.match(/[0-7]/)[0]);
+                currentColor = xtermToRgbHex(colorNum);
+              } else if (colorCode.match(/(?:\x1b|\u001b|\\033|\\x1B|\\27)\[9[0-7]m/)) {
+                // Bright colors (90-97)
+                const colorNum = parseInt(colorCode.match(/[0-7]/)[0]) + 8;
+                currentColor = xtermToRgbHex(colorNum);
+              } else if (colorCode.match(/(?:\x1b|\u001b|\\033|\\x1B|\\27)\[38;5;(\d+)m/)) {
+                // 256 color
+                const matches = colorCode.match(/(?:\x1b|\u001b|\\033|\\x1B|\\27)\[38;5;(\d+)m/);
+                const colorNum = parseInt(matches[1]);
+                currentColor = xtermToRgbHex(colorNum);
+              } else if (colorCode.match(/(?:\x1b|\u001b|\\033|\\x1B|\\27)\[38;2;(\d+);(\d+);(\d+)m/)) {
+                // True color
+                const matches = colorCode.match(/(?:\x1b|\u001b|\\033|\\x1B|\\27)\[38;2;(\d+);(\d+);(\d+)m/);
+                const r = parseInt(matches[1]);
+                const g = parseInt(matches[2]);
+                const b = parseInt(matches[3]);
+                currentColor = `rgb(${r},${g},${b})`;
+              }
+            } else if (colorCode.startsWith("$X") && colorCode.length === 8) {
+              // Handle $X truecolor format
+              const hex = colorCode.slice(2);
+              currentColor = `#${hex}`;
+            } else if (
               (colorCode.startsWith("$x") ||
                 colorCode.startsWith("@x") ||
                 colorCode.startsWith("{x")) &&
@@ -584,6 +647,241 @@
         });
       }
 
+      // Helper functions for random gradient generation
+      function randomRgbColor() {
+        return {
+          r: Math.floor(Math.random() * 256),
+          g: Math.floor(Math.random() * 256),
+          b: Math.floor(Math.random() * 256)
+        };
+      }
+
+      function toHex(n) {
+        return n.toString(16).padStart(2, '0');
+      }
+
+      // Brightness adjustment functions
+      function adjustBrightness(rgb, factor, preservePrecision = false) {
+        // factor is -100 to 100
+        // For truecolor, we want to avoid rounding errors
+        if (preservePrecision) {
+          // Use a reversible linear transformation
+          // Use a fixed step size for better reversibility (13 units per 5%)
+          const adjustment = factor > 0 ? 13 : -13;
+          return {
+            r: Math.max(0, Math.min(255, rgb.r + adjustment)),
+            g: Math.max(0, Math.min(255, rgb.g + adjustment)),
+            b: Math.max(0, Math.min(255, rgb.b + adjustment))
+          };
+        } else {
+          // For xterm colors, use blending approach
+          if (factor > 0) {
+            // Lightening: blend with white
+            const blend = factor / 100;
+            return {
+              r: Math.round(rgb.r + (255 - rgb.r) * blend),
+              g: Math.round(rgb.g + (255 - rgb.g) * blend),
+              b: Math.round(rgb.b + (255 - rgb.b) * blend)
+            };
+          } else {
+            // Darkening: blend with black
+            const blend = -factor / 100;
+            return {
+              r: Math.round(rgb.r * (1 - blend)),
+              g: Math.round(rgb.g * (1 - blend)),
+              b: Math.round(rgb.b * (1 - blend))
+            };
+          }
+        }
+      }
+
+      function xtermToRgb(colorIndex) {
+        if (colorIndex < 16) {
+          const standardColors = [
+            {r: 0, g: 0, b: 0},      // 0: black
+            {r: 128, g: 0, b: 0},    // 1: dark red
+            {r: 0, g: 128, b: 0},    // 2: dark green
+            {r: 128, g: 128, b: 0},  // 3: dark yellow
+            {r: 0, g: 0, b: 128},    // 4: dark blue
+            {r: 128, g: 0, b: 128},  // 5: dark magenta
+            {r: 0, g: 128, b: 128},  // 6: dark cyan
+            {r: 192, g: 192, b: 192},// 7: silver
+            {r: 128, g: 128, b: 128},// 8: gray
+            {r: 255, g: 0, b: 0},    // 9: red
+            {r: 0, g: 255, b: 0},    // 10: green
+            {r: 255, g: 255, b: 0},  // 11: yellow
+            {r: 0, g: 0, b: 255},    // 12: blue
+            {r: 255, g: 0, b: 255},  // 13: magenta
+            {r: 0, g: 255, b: 255},  // 14: cyan
+            {r: 255, g: 255, b: 255} // 15: white
+          ];
+          return standardColors[colorIndex];
+        } else if (colorIndex >= 16 && colorIndex <= 231) {
+          const base = colorIndex - 16;
+          const r = (Math.floor(base / 36) % 6) * 51;
+          const g = (Math.floor(base / 6) % 6) * 51;
+          const b = (base % 6) * 51;
+          return {r, g, b};
+        } else if (colorIndex >= 232 && colorIndex <= 255) {
+          const gray = Math.round((colorIndex - 232) * 10 + 8);
+          return {r: gray, g: gray, b: gray};
+        } else {
+          return {r: 255, g: 255, b: 255};
+        }
+      }
+
+      function rgbToXterm(rgb) {
+        // Find closest xterm color
+        let minDistance = Infinity;
+        let closestIndex = 0;
+        
+        // Check standard 16 colors
+        for (let i = 0; i < 16; i++) {
+          const xterm = xtermToRgb(i);
+          const distance = Math.pow(rgb.r - xterm.r, 2) + 
+                          Math.pow(rgb.g - xterm.g, 2) + 
+                          Math.pow(rgb.b - xterm.b, 2);
+          if (distance < minDistance) {
+            minDistance = distance;
+            closestIndex = i;
+          }
+        }
+        
+        // Check 6x6x6 color cube
+        const xr = Math.round(rgb.r / 51);
+        const xg = Math.round(rgb.g / 51);
+        const xb = Math.round(rgb.b / 51);
+        const cubeIndex = 16 + 36 * Math.min(5, xr) + 6 * Math.min(5, xg) + Math.min(5, xb);
+        const cubeColor = xtermToRgb(cubeIndex);
+        const cubeDistance = Math.pow(rgb.r - cubeColor.r, 2) + 
+                            Math.pow(rgb.g - cubeColor.g, 2) + 
+                            Math.pow(rgb.b - cubeColor.b, 2);
+        if (cubeDistance < minDistance) {
+          closestIndex = cubeIndex;
+        }
+        
+        return closestIndex;
+      }
+
+      // Adjust xterm color within its own color space
+      function adjustXtermColor(colorIndex, lighter) {
+        // Standard 16 colors (0-15) - use predefined mappings
+        if (colorIndex < 16) {
+          const standardLighter = {
+            0: 8,   // black -> gray
+            1: 9,   // dark red -> bright red
+            2: 10,  // dark green -> bright green
+            3: 11,  // dark yellow -> bright yellow
+            4: 12,  // dark blue -> bright blue
+            5: 13,  // dark magenta -> bright magenta
+            6: 14,  // dark cyan -> bright cyan
+            7: 15,  // silver -> white
+            8: 15,  // gray -> white
+            9: 9,   // bright red (stay at max)
+            10: 10, // bright green (stay at max)
+            11: 11, // bright yellow (stay at max)
+            12: 12, // bright blue (stay at max)
+            13: 13, // bright magenta (stay at max)
+            14: 14, // bright cyan (stay at max)
+            15: 15  // white (stay at max)
+          };
+          const standardDarker = {
+            0: 0,   // black (stay at min)
+            1: 1,   // dark red (stay at min)
+            2: 2,   // dark green (stay at min)
+            3: 3,   // dark yellow (stay at min)
+            4: 4,   // dark blue (stay at min)
+            5: 5,   // dark magenta (stay at min)
+            6: 6,   // dark cyan (stay at min)
+            7: 8,   // silver -> gray
+            8: 0,   // gray -> black
+            9: 1,   // bright red -> dark red
+            10: 2,  // bright green -> dark green
+            11: 3,  // bright yellow -> dark yellow
+            12: 4,  // bright blue -> dark blue
+            13: 5,  // bright magenta -> dark magenta
+            14: 6,  // bright cyan -> dark cyan
+            15: 7   // white -> silver
+          };
+          return lighter ? standardLighter[colorIndex] : standardDarker[colorIndex];
+        }
+        
+        // 6x6x6 color cube (16-231)
+        if (colorIndex >= 16 && colorIndex <= 231) {
+          const base = colorIndex - 16;
+          let r = Math.floor(base / 36) % 6;
+          let g = Math.floor(base / 6) % 6;
+          let b = base % 6;
+          
+          if (lighter) {
+            // Increase each component by 1 (max 5)
+            r = Math.min(5, r + 1);
+            g = Math.min(5, g + 1);
+            b = Math.min(5, b + 1);
+          } else {
+            // Decrease each component by 1 (min 0)
+            r = Math.max(0, r - 1);
+            g = Math.max(0, g - 1);
+            b = Math.max(0, b - 1);
+          }
+          
+          return 16 + 36 * r + 6 * g + b;
+        }
+        
+        // Grayscale ramp (232-255)
+        if (colorIndex >= 232 && colorIndex <= 255) {
+          if (lighter) {
+            return Math.min(255, colorIndex + 1);
+          } else {
+            return Math.max(232, colorIndex - 1);
+          }
+        }
+        
+        return colorIndex; // fallback
+      }
+
+      function generateRandomTruecolorGradient(str) {
+        let chars = Array.from(str);
+        // count only non-whitespace characters for gradient steps
+        let total = chars.filter(c => /\S/.test(c)).length;
+
+        // Use two random colors for the gradient ends
+        let startColor = randomRgbColor();
+        let endColor = randomRgbColor();
+
+        let out = '';
+        let nonWhitespaceIdx = 0;
+        let lastAppliedColorHex = null; // Track last applied truecolor hex
+
+        for (let char of chars) {
+          if (/\s/.test(char)) {
+            out += char; // Add whitespace directly
+          } else {
+            // Calculate interpolation factor (t) based on non-whitespace character index
+            let t = total > 1 ? nonWhitespaceIdx / (total - 1) : 0;
+
+            // Interpolate RGB components
+            let r = Math.round(startColor.r + (endColor.r - startColor.r) * t);
+            let g = Math.round(startColor.g + (endColor.g - startColor.g) * t);
+            let b = Math.round(startColor.b + (endColor.b - startColor.b) * t);
+
+            // Always use $X format for random gradients (will be converted if needed)
+            let hex = toHex(r) + toHex(g) + toHex(b);
+            const colorCode = '$X' + hex;
+
+            // Only apply color code if it's different from the last one
+            if (colorCode !== lastAppliedColorHex) {
+                 out += colorCode;
+                 lastAppliedColorHex = colorCode;
+            }
+
+            out += char;
+            nonWhitespaceIdx++;
+          }
+        }
+        return out;
+      }
+
       function wrapColorCode(colorIndex) {
         const format = document.getElementById("formatSelector").value;
         if (format === "@x") {
@@ -594,6 +892,29 @@
           return `$x${String(colorIndex).padStart(3, "0")}`;
         } else if (format === "&") {
           return `&${String(colorIndex).padStart(3, "0")}`;
+        } else if (format.startsWith("ansi-")) {
+          // ANSI escape codes - different formats for different languages
+          let escapeSeq;
+          if (format === "ansi-shell") {
+            escapeSeq = "\\033";
+          } else if (format === "ansi-rust") {
+            escapeSeq = "\\x1B";
+          } else if (format === "ansi-lua") {
+            escapeSeq = "\\27";
+          } else if (format === "ansi-c") {
+            escapeSeq = "\\033";
+          }
+          
+          if (colorIndex < 8) {
+            // Standard colors (30-37)
+            return `${escapeSeq}[3${colorIndex}m`;
+          } else if (colorIndex < 16) {
+            // Bright colors (90-97)
+            return `${escapeSeq}[9${colorIndex - 8}m`;
+          } else {
+            // Extended 256 colors
+            return `${escapeSeq}[38;5;${colorIndex}m`;
+          }
         } else if (format === "@[F") {
           let fCode = "F000";
           if (colorIndex >= 16 && colorIndex <= 231) {
@@ -651,6 +972,9 @@
 
       function convertColorCodesToFormat(text, newFormat) {
         let converted = "";
+        // Add ANSI reset when switching to ANSI format
+        let needsReset = false;
+        
         text.replace(regex, (match, colorCode, textContent) => {
           if (colorCode) {
             let colorIndex = null;
@@ -714,16 +1038,25 @@
               colorIndex = 7;
             }
             converted += wrapColorCode(colorIndex);
+            if (newFormat === "ansi") {
+              needsReset = true;
+            }
           } else if (textContent) {
             converted += textContent;
           }
         });
+        // Add ANSI reset at the end if using ANSI format
+        if (newFormat === "ansi" && needsReset) {
+          converted += "\\033[0m";
+        }
         return converted;
       }
 
       function applyOriginalPattern(text, colors) {
         let result = "";
         let lastColorIndex = null;
+        const format = document.getElementById("formatSelector").value;
+        
         for (let i = 0; i < text.length; i++) {
           const char = text[i];
           const colorIndex = colors[i % colors.length];
@@ -733,6 +1066,13 @@
           }
           result += char;
         }
+        
+        // Add ANSI reset at the end if using ANSI format
+        if (format.startsWith("ansi-") && lastColorIndex !== null) {
+          const escapeSeq = format === "ansi-rust" ? "\\x1B" : format === "ansi-lua" ? "\\27" : "\\033";
+          result += `${escapeSeq}[0m`;
+        }
+        
         return result;
       }
 
@@ -740,6 +1080,7 @@
         const n = text.length;
         const c = colors.length;
         if (n === 0) return "";
+        const format = document.getElementById("formatSelector").value;
         const baseSize = Math.floor(n / c);
         let remainder = n % c;
         let segments = [];
@@ -752,6 +1093,7 @@
           segments.push({ segment, colorIndex: colors[i] });
         }
         let result = "";
+        let hasColor = false;
         segments.forEach(({ segment, colorIndex }) => {
           if (!segment) return;
           let lastColorIndex = null;
@@ -760,10 +1102,18 @@
             if (!/\s/.test(char) && colorIndex !== lastColorIndex) {
               result += wrapColorCode(colorIndex);
               lastColorIndex = colorIndex;
+              hasColor = true;
             }
             result += char;
           }
         });
+        
+        // Add ANSI reset at the end if using ANSI format
+        if (format.startsWith("ansi-") && hasColor) {
+          const escapeSeq = format === "ansi-rust" ? "\\x1B" : format === "ansi-lua" ? "\\27" : "\\033";
+          result += `${escapeSeq}[0m`;
+        }
+        
         return result;
       }
 
@@ -772,6 +1122,7 @@
         if (c < 2) {
           return applyOriginalPattern(text, colors);
         }
+        const format = document.getElementById("formatSelector").value;
         let result = "";
         let lastColorIndex = null;
         const cycleLength = 2 * c - 2;
@@ -788,6 +1139,13 @@
           }
           result += char;
         }
+        
+        // Add ANSI reset at the end if using ANSI format
+        if (format.startsWith("ansi-") && lastColorIndex !== null) {
+          const escapeSeq = format === "ansi-rust" ? "\\x1B" : format === "ansi-lua" ? "\\27" : "\\033";
+          result += `${escapeSeq}[0m`;
+        }
+        
         return result;
       }
 
@@ -805,7 +1163,7 @@
         
         while (i < mergedText.length) {
           const remaining = mergedText.slice(i);
-          const colorMatch = remaining.match(/^(\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3})/);
+          const colorMatch = remaining.match(/^(\$X[0-9a-fA-F]{6}|\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3})/);
           
           if (colorMatch) {
             currentWord += colorMatch[0];
@@ -837,7 +1195,7 @@
         allWords.forEach((word) => {
           // Calculate visible length of word
           const visibleWord = word.replace(
-            /\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3}/g,
+            /\$X[0-9a-fA-F]{6}|\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3}/g,
             ""
           );
           const wordLength = visibleWord.length;
@@ -877,14 +1235,32 @@
         const index = select.selectedIndex;
         if (index < 0) return;
         const gradient = gradients[index];
-        const colors = invert ? gradient.colors.slice().reverse() : gradient.colors;
+        
         let gradientText = "";
-        if (pattern === "original") {
-          gradientText = applyOriginalPattern(text, colors);
-        } else if (pattern === "distributed") {
-          gradientText = distributeColorsEvenly(text, colors);
-        } else if (pattern === "symmetrical") {
-          gradientText = applySymmetricalPattern(text, colors);
+        
+        // Check if it's a truecolor gradient
+        if (gradient.isTruecolor) {
+          // For truecolor gradients, generate using the stored RGB values
+          const startColor = invert ? gradient.colors[1] : gradient.colors[0];
+          const endColor = invert ? gradient.colors[0] : gradient.colors[1];
+          
+          if (pattern === "original") {
+            gradientText = generateTruecolorGradientFromColors(text, startColor, endColor);
+          } else if (pattern === "distributed") {
+            gradientText = distributeTruecolorsEvenly(text, startColor, endColor);
+          } else if (pattern === "symmetrical") {
+            gradientText = applySymmetricalTruecolorPattern(text, startColor, endColor);
+          }
+        } else {
+          // Regular xterm gradient
+          const colors = invert ? gradient.colors.slice().reverse() : gradient.colors;
+          if (pattern === "original") {
+            gradientText = applyOriginalPattern(text, colors);
+          } else if (pattern === "distributed") {
+            gradientText = distributeColorsEvenly(text, colors);
+          } else if (pattern === "symmetrical") {
+            gradientText = applySymmetricalPattern(text, colors);
+          }
         }
         
         // Keep the input clean, put colored text in copyable output
@@ -899,6 +1275,151 @@
         
         originalText = text;
         updateOutput(gradientText);
+      }
+
+      function generateTruecolorGradientFromColors(str, startColor, endColor) {
+        let chars = Array.from(str);
+        // count only non-whitespace characters for gradient steps
+        let total = chars.filter(c => /\S/.test(c)).length;
+
+        let out = '';
+        let nonWhitespaceIdx = 0;
+        let lastAppliedColorHex = null;
+        
+        const format = document.getElementById("formatSelector").value;
+        const useAnsi = format.startsWith("ansi-");
+
+        for (let char of chars) {
+          if (/\s/.test(char)) {
+            out += char;
+          } else {
+            // Calculate interpolation factor (t) based on non-whitespace character index
+            let t = total > 1 ? nonWhitespaceIdx / (total - 1) : 0;
+
+            // Interpolate RGB components
+            let r = Math.round(startColor.r + (endColor.r - startColor.r) * t);
+            let g = Math.round(startColor.g + (endColor.g - startColor.g) * t);
+            let b = Math.round(startColor.b + (endColor.b - startColor.b) * t);
+
+            // Format based on selected format
+            let colorCode;
+            if (useAnsi) {
+              // ANSI 24-bit true color format
+              colorCode = `\\033[38;2;${r};${g};${b}m`;
+            } else {
+              // Default to $X format
+              let hex = toHex(r) + toHex(g) + toHex(b);
+              colorCode = '$X' + hex;
+            }
+
+            // Only apply color code if it's different from the last one
+            if (colorCode !== lastAppliedColorHex) {
+                 out += colorCode;
+                 lastAppliedColorHex = colorCode;
+            }
+
+            out += char;
+            nonWhitespaceIdx++;
+          }
+        }
+        
+        // Add ANSI reset at the end if using ANSI format
+        if (useAnsi && lastAppliedColorHex) {
+          out += "\\033[0m";
+        }
+        
+        return out;
+      }
+
+      function distributeTruecolorsEvenly(text, startColor, endColor) {
+        const n = text.length;
+        if (n === 0) return "";
+        
+        // Create multiple color steps for distribution (similar to how xterm gradients work)
+        const numSteps = 10; // Create 10 color steps between start and end
+        const colors = [];
+        
+        for (let i = 0; i < numSteps; i++) {
+          const t = i / (numSteps - 1);
+          colors.push({
+            r: Math.round(startColor.r + (endColor.r - startColor.r) * t),
+            g: Math.round(startColor.g + (endColor.g - startColor.g) * t),
+            b: Math.round(startColor.b + (endColor.b - startColor.b) * t)
+          });
+        }
+        
+        // Now distribute these colors evenly across the text
+        const c = colors.length;
+        const baseSize = Math.floor(n / c);
+        let remainder = n % c;
+        let segments = [];
+        let startIndex = 0;
+        
+        for (let i = 0; i < c; i++) {
+          const segmentSize = baseSize + (remainder > 0 ? 1 : 0);
+          remainder = remainder > 0 ? remainder - 1 : remainder;
+          const segment = text.slice(startIndex, startIndex + segmentSize);
+          startIndex += segmentSize;
+          segments.push({ segment, color: colors[i] });
+        }
+        
+        let result = "";
+        segments.forEach(({ segment, color }) => {
+          if (!segment) return;
+          let lastAppliedColorHex = null;
+          for (let i = 0; i < segment.length; i++) {
+            const char = segment[i];
+            if (!/\s/.test(char)) {
+              const hex = toHex(color.r) + toHex(color.g) + toHex(color.b);
+              const colorCode = '$X' + hex;
+              
+              if (colorCode !== lastAppliedColorHex) {
+                result += colorCode;
+                lastAppliedColorHex = colorCode;
+              }
+            }
+            result += char;
+          }
+        });
+        
+        return result;
+      }
+
+      function applySymmetricalTruecolorPattern(text, startColor, endColor) {
+        let chars = Array.from(text);
+        let total = chars.length;
+        if (total === 0) return "";
+        
+        let out = '';
+        let lastAppliedColorHex = null;
+        
+        for (let i = 0; i < total; i++) {
+          const char = chars[i];
+          if (!/\s/.test(char)) {
+            // Calculate position in symmetrical pattern (0 to 1 to 0)
+            let t;
+            if (i <= total / 2) {
+              t = (i * 2) / total;
+            } else {
+              t = 2 - (i * 2) / total;
+            }
+            
+            // Interpolate RGB components
+            let r = Math.round(startColor.r + (endColor.r - startColor.r) * t);
+            let g = Math.round(startColor.g + (endColor.g - startColor.g) * t);
+            let b = Math.round(startColor.b + (endColor.b - startColor.b) * t);
+            
+            const hex = toHex(r) + toHex(g) + toHex(b);
+            const colorCode = '$X' + hex;
+            
+            if (colorCode !== lastAppliedColorHex) {
+              out += colorCode;
+              lastAppliedColorHex = colorCode;
+            }
+          }
+          out += char;
+        }
+        return out;
       }
 
       function updateOutput(coloredText) {
@@ -922,7 +1443,14 @@
         if (index < 0) return;
         const gradient = gradients[index];
         const preview = document.getElementById("gradientPreview");
-        if (gradient.colors.length > 1) {
+        
+        if (gradient.isTruecolor) {
+          // Handle truecolor gradients
+          const invert = document.getElementById("invertGradient").checked;
+          const startColor = invert ? gradient.colors[1] : gradient.colors[0];
+          const endColor = invert ? gradient.colors[0] : gradient.colors[1];
+          preview.style.background = `linear-gradient(to right, rgb(${startColor.r},${startColor.g},${startColor.b}), rgb(${endColor.r},${endColor.g},${endColor.b}))`;
+        } else if (gradient.colors.length > 1) {
           const invert = document.getElementById("invertGradient").checked;
           const colors = invert ? gradient.colors.slice().reverse() : gradient.colors;
           preview.style.background = `linear-gradient(to right, ${colors
@@ -943,7 +1471,17 @@
           gradientCanvas.width = 100;
           gradientCanvas.height = 20;
           const ctx = gradientCanvas.getContext("2d");
-          if (gradient.colors.length > 1) {
+          
+          if (gradient.isTruecolor) {
+            // Handle truecolor gradients
+            const gradientStyle = ctx.createLinearGradient(0, 0, gradientCanvas.width, 0);
+            const startColor = gradient.colors[0];
+            const endColor = gradient.colors[1];
+            gradientStyle.addColorStop(0, `rgb(${startColor.r},${startColor.g},${startColor.b})`);
+            gradientStyle.addColorStop(1, `rgb(${endColor.r},${endColor.g},${endColor.b})`);
+            ctx.fillStyle = gradientStyle;
+            ctx.fillRect(0, 0, gradientCanvas.width, gradientCanvas.height);
+          } else if (gradient.colors.length > 1) {
             const gradientStyle = ctx.createLinearGradient(0, 0, gradientCanvas.width, 0);
             gradient.colors.forEach((color, idx) => {
               const stopPosition = gradient.colors.length > 1 ? idx / (gradient.colors.length - 1) : 0;
@@ -1275,7 +1813,7 @@
         const pastedText = (event.clipboardData || window.clipboardData).getData('text');
         
         // Check if the pasted text has color codes
-        const hasColorCodes = /\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3}/.test(pastedText);
+        const hasColorCodes = /\$X[0-9a-fA-F]{6}|\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3}/.test(pastedText);
         
         if (hasColorCodes) {
           // Prevent default paste behavior
@@ -1283,7 +1821,7 @@
           
           // Strip color codes for the input box (clean text for editing)
           const cleanText = pastedText.replace(
-            /\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3}/g,
+            /\$X[0-9a-fA-F]{6}|\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rRgGyYbBmMcCwWdD](?:\d{3})?|@[rRgGyYbBmMcCwWdD](?:\d{3})?|\&[rRgGyYbBmMcCwWdD](?:\d{3})?|\{[rRgGyYbBmMcCwWdD](?:\d{3})?|\{\d{3}|\&\d{3}/g,
             ""
           );
           
@@ -1360,6 +1898,79 @@
         } else {
           addGradientDiv.style.display = "none";
           this.value = "Create custom gradient";
+        }
+      });
+
+      // Random gradient button event listener
+      document.getElementById("randomGradientButton").addEventListener("click", function () {
+        const textInput = document.getElementById("textInput");
+        const copyableOutput = document.getElementById("copyableOutput");
+        const text = textInput.value;
+        
+        if (!text) {
+          alert("Please enter some text first!");
+          return;
+        }
+        
+        // Generate random gradient with truecolor
+        const gradientText = generateRandomTruecolorGradient(text);
+        
+        // Update copyable output
+        copyableOutput.value = gradientText;
+        
+        // Update the preview
+        updateOutput(gradientText);
+        
+        // Store the last generated gradient info for saving
+        window.lastGeneratedGradient = gradientText;
+        
+        // Show the save button
+        document.getElementById("saveRandomGradientButton").style.display = "inline-block";
+      });
+
+      // Save random gradient button event listener
+      document.getElementById("saveRandomGradientButton").addEventListener("click", function () {
+        if (!window.lastGeneratedGradient) return;
+        
+        // Extract the start and end colors from the generated text
+        const colorMatches = window.lastGeneratedGradient.match(/\$X([0-9a-fA-F]{6})/g);
+        if (colorMatches && colorMatches.length >= 2) {
+          const startHex = colorMatches[0].slice(2);
+          const endHex = colorMatches[colorMatches.length - 1].slice(2);
+          
+          // Prompt for gradient name
+          const gradientName = prompt("Enter a name for this gradient:", `Random Gradient ${new Date().toLocaleTimeString()}`);
+          if (gradientName) {
+            // Store as truecolor gradient
+            const startRgb = {
+              r: parseInt(startHex.slice(0, 2), 16),
+              g: parseInt(startHex.slice(2, 4), 16),
+              b: parseInt(startHex.slice(4, 6), 16)
+            };
+            const endRgb = {
+              r: parseInt(endHex.slice(0, 2), 16),
+              g: parseInt(endHex.slice(2, 4), 16),
+              b: parseInt(endHex.slice(4, 6), 16)
+            };
+            
+            // Add to custom gradients with truecolor flag
+            customGradients.push({
+              name: gradientName,
+              colors: [startRgb, endRgb],
+              isTruecolor: true
+            });
+            saveCustomGradients();
+            gradients = builtInGradients.concat(customGradients);
+            populateGradientSelect();
+            
+            // Select the newly created gradient
+            const select = document.getElementById("gradientSelect");
+            select.value = gradientName;
+            updateGradientPreview();
+            
+            // Hide the save button
+            this.style.display = "none";
+          }
         }
       });
 
@@ -1463,20 +2074,29 @@
       // --- Editing Custom Gradients in the Management Section ---
 
       // Update the preview for an editable custom gradient
-      function updateEditGradientPreview(codesString, previewBox) {
-        const codesArr = codesString.trim().split(/\s+/).map(item => parseInt(item, 10));
-        if (codesArr.some(code => isNaN(code) || code < 0 || code > 255)) {
-          previewBox.style.background = "";
-          return;
+      function updateEditGradientPreview(gradient, previewBox) {
+        if (gradient.isTruecolor) {
+          // Handle truecolor gradients
+          const startColor = gradient.colors[0];
+          const endColor = gradient.colors[1];
+          previewBox.style.background = `linear-gradient(to right, rgb(${startColor.r},${startColor.g},${startColor.b}), rgb(${endColor.r},${endColor.g},${endColor.b}))`;
+        } else {
+          // Handle xterm gradients
+          const codesString = gradient.colors.join(" ");
+          const codesArr = codesString.trim().split(/\s+/).map(item => parseInt(item, 10));
+          if (codesArr.some(code => isNaN(code) || code < 0 || code > 255)) {
+            previewBox.style.background = "";
+            return;
+          }
+          const colors = codesArr.map(xtermToRgbHex);
+          let backgroundStyle = "";
+          if (colors.length > 1) {
+            backgroundStyle = `linear-gradient(to right, ${colors.join(", ")})`;
+          } else if (colors.length === 1) {
+            backgroundStyle = colors[0];
+          }
+          previewBox.style.background = backgroundStyle;
         }
-        const colors = codesArr.map(xtermToRgbHex);
-        let backgroundStyle = "";
-        if (colors.length > 1) {
-          backgroundStyle = `linear-gradient(to right, ${colors.join(", ")})`;
-        } else if (colors.length === 1) {
-          backgroundStyle = colors[0];
-        }
-        previewBox.style.background = backgroundStyle;
       }
 
       // Populate the list of custom gradients for management (with inline editing)
@@ -1494,8 +2114,8 @@
           // Preview box
           const previewBox = document.createElement("div");
           previewBox.classList.add("custom-gradient-preview");
-          // Initially update preview using stored codes
-          updateEditGradientPreview(grad.colors.join(" "), previewBox);
+          // Initially update preview
+          updateEditGradientPreview(grad, previewBox);
 
           // Name input
           const nameInput = document.createElement("input");
@@ -1503,34 +2123,57 @@
           nameInput.classList.add("edit-gradient-name");
           nameInput.value = grad.name;
 
-          // Codes input
-          const codesInput = document.createElement("input");
-          codesInput.type = "text";
-          codesInput.classList.add("edit-gradient-codes");
-          codesInput.value = grad.colors.join(" ");
-          codesInput.addEventListener("input", function() {
-            updateEditGradientPreview(this.value, previewBox);
-          });
+          if (grad.isTruecolor) {
+            // For truecolor gradients, show them as read-only
+            const colorInfo = document.createElement("span");
+            colorInfo.style.marginLeft = "10px";
+            colorInfo.style.color = "#888";
+            colorInfo.textContent = "Truecolor gradient (non-editable)";
+            
+            // Remove button
+            const removeBtn = document.createElement("button");
+            removeBtn.textContent = "Remove";
+            removeBtn.style.marginLeft = "10px";
+            removeBtn.addEventListener("click", function() {
+              removeCustomGradient(index);
+            });
 
-          // Save button
-          const saveBtn = document.createElement("button");
-          saveBtn.textContent = "Save";
-          saveBtn.addEventListener("click", function() {
-            saveEditedGradient(index, nameInput, codesInput);
-          });
+            gradDiv.appendChild(previewBox);
+            gradDiv.appendChild(nameInput);
+            gradDiv.appendChild(colorInfo);
+            gradDiv.appendChild(removeBtn);
+          } else {
+            // For xterm gradients, keep the editable interface
+            // Codes input
+            const codesInput = document.createElement("input");
+            codesInput.type = "text";
+            codesInput.classList.add("edit-gradient-codes");
+            codesInput.value = grad.colors.join(" ");
+            codesInput.addEventListener("input", function() {
+              const tempGrad = { ...grad, colors: this.value.trim().split(/\s+/).map(c => parseInt(c, 10)) };
+              updateEditGradientPreview(tempGrad, previewBox);
+            });
 
-          // Remove button
-          const removeBtn = document.createElement("button");
-          removeBtn.textContent = "Remove";
-          removeBtn.addEventListener("click", function() {
-            removeCustomGradient(index);
-          });
+            // Save button
+            const saveBtn = document.createElement("button");
+            saveBtn.textContent = "Save";
+            saveBtn.addEventListener("click", function() {
+              saveEditedGradient(index, nameInput, codesInput);
+            });
 
-          gradDiv.appendChild(previewBox);
-          gradDiv.appendChild(nameInput);
-          gradDiv.appendChild(codesInput);
-          gradDiv.appendChild(saveBtn);
-          gradDiv.appendChild(removeBtn);
+            // Remove button
+            const removeBtn = document.createElement("button");
+            removeBtn.textContent = "Remove";
+            removeBtn.addEventListener("click", function() {
+              removeCustomGradient(index);
+            });
+
+            gradDiv.appendChild(previewBox);
+            gradDiv.appendChild(nameInput);
+            gradDiv.appendChild(codesInput);
+            gradDiv.appendChild(saveBtn);
+            gradDiv.appendChild(removeBtn);
+          }
 
           container.appendChild(gradDiv);
         });
@@ -1579,22 +2222,6 @@
         populateCustomGradientsList();
       }
 
-      // Format conversion event
-      document.getElementById("formatSelector").addEventListener("change", function () {
-        const text = document.getElementById("textInput").value;
-        const newFormat = this.value;
-        const converted = convertColorCodesToFormat(text, newFormat);
-        document.getElementById("textInput").value = converted;
-        if (getSelectedMode() === "edit") {
-          originalText = converted.replace(
-            /\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rKrRgGyYbBmMcCwWdD]|@[rKrRgGyYbBmMcCwWdD]|\{[rKrRgGyYbBmMcCwWdD]|\&[rKrRgGyYbBmMcCwWdD](?:\d{3})?|\&\d{3}/g,
-            ""
-          );
-          applyGradient();
-        } else {
-          updateOutput();
-        }
-      });
 
       function initialize() {
         populateGradientSelect();
@@ -1610,6 +2237,38 @@
       document.getElementById("gradientSelect").addEventListener("change", onGradientChange);
       document.getElementById("patternSelect").addEventListener("change", onPatternChange);
       document.getElementById("invertGradient").addEventListener("change", onGradientChange);
+      
+      // Format conversion event
+      document.getElementById("formatSelector").addEventListener("change", function () {
+        console.log("Format selector changed to:", this.value);
+        const text = document.getElementById("textInput").value;
+        const newFormat = this.value;
+        const converted = convertColorCodesToFormat(text, newFormat);
+        document.getElementById("textInput").value = converted;
+        
+        const copyableOutput = document.getElementById("copyableOutput");
+        
+        // Show/hide ANSI help text
+        document.getElementById("ansiHelp").style.display = newFormat.startsWith("ansi-") ? "inline" : "none";
+        
+        if (getSelectedMode() === "edit") {
+          // In edit mode, convert existing copyable output if it has content
+          if (copyableOutput.value) {
+            const convertedCopyable = convertColorCodesToFormat(copyableOutput.value, newFormat);
+            copyableOutput.value = convertedCopyable;
+          }
+          
+          originalText = converted.replace(
+            /\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|@n|\$[rKrRgGyYbBmMcCwWdD]|@[rKrRgGyYbBmMcCwWdD]|\{[rKrRgGyYbBmMcCwWdD]|\&[rKrRgGyYbBmMcCwWdD](?:\d{3})?|\&\d{3}/g,
+            ""
+          );
+          applyGradient();
+        } else {
+          // In viewer mode, always update copyable output with the converted text
+          copyableOutput.value = converted;
+          updateOutput();
+        }
+      });
 
       // Format button event listener
       document.getElementById("formatButton").addEventListener("click", function() {
@@ -1632,11 +2291,20 @@
       document.getElementById("copyButton").addEventListener("click", async function() {
         const copyableOutput = document.getElementById("copyableOutput");
         const copyButton = this;
+        let textToCopy = copyableOutput.value;
+        
+        // Special handling for ANSI format - ensure proper escape characters
+        const format = document.getElementById("formatSelector").value;
+        if (format.startsWith("ansi-")) {
+          // For ANSI, the text already contains \u001b which should work
+          // But we'll add a note for the user
+          console.log("Copying ANSI codes. To test in terminal, use: echo -e \"" + textToCopy.substring(0, 50) + "...\"");
+        }
         
         try {
           // Use the modern Clipboard API if available
           if (navigator.clipboard && window.isSecureContext) {
-            await navigator.clipboard.writeText(copyableOutput.value);
+            await navigator.clipboard.writeText(textToCopy);
           } else {
             // Fallback for older browsers
             copyableOutput.select();
@@ -1662,6 +2330,149 @@
             copyButton.textContent = "Copy";
           }, 2000);
         }
+      });
+
+      // Function to adjust brightness of color codes in text
+      function adjustTextBrightness(text, factor) {
+        // Match all color codes including ANSI (both actual escape chars and visible \033)
+        return text.replace(/((?:\x1b|\u001b|\\033)\[(?:3[0-7]|9[0-7]|38;5;\d{1,3}|38;2;\d{1,3};\d{1,3};\d{1,3})m|\$X[0-9a-fA-F]{6}|\$x\d{3}|@x\d{3}|\{x\d{3}|\^\[[F]\d{3}\]|@\[[F]\d{3}\]|\\t\[[F]\d{3}\]|\&\d{3}|\{\d{3})/g, function(match) {
+          let rgb;
+          let newColorCode;
+          
+          if (match.startsWith("\x1b[") || match.startsWith("\u001b[") || match.startsWith("\\033[")) {
+            // Handle ANSI codes
+            if (match.match(/(?:\x1b|\u001b|\\033)\[3[0-7]m/)) {
+              // Standard colors (30-37)
+              const colorNum = parseInt(match.match(/[0-7]/)[0]);
+              const newIdx = adjustXtermColor(colorNum, factor > 0);
+              newColorCode = `\\033[3${newIdx}m`;
+            } else if (match.match(/(?:\x1b|\u001b|\\033)\[9[0-7]m/)) {
+              // Bright colors (90-97)
+              const colorNum = parseInt(match.match(/[0-7]/)[0]) + 8;
+              const newIdx = adjustXtermColor(colorNum, factor > 0);
+              if (newIdx < 8) {
+                newColorCode = `\\033[3${newIdx}m`;
+              } else {
+                newColorCode = `\\033[9${newIdx - 8}m`;
+              }
+            } else if (match.match(/(?:\x1b|\u001b|\\033)\[38;5;(\d+)m/)) {
+              // 256 color
+              const matches = match.match(/(?:\x1b|\u001b|\\033)\[38;5;(\d+)m/);
+              const colorNum = parseInt(matches[1]);
+              const newIdx = adjustXtermColor(colorNum, factor > 0);
+              newColorCode = `\\033[38;5;${newIdx}m`;
+            } else if (match.match(/(?:\x1b|\u001b|\\033)\[38;2;(\d+);(\d+);(\d+)m/)) {
+              // True color
+              const matches = match.match(/(?:\x1b|\u001b|\\033)\[38;2;(\d+);(\d+);(\d+)m/);
+              rgb = {
+                r: parseInt(matches[1]),
+                g: parseInt(matches[2]),
+                b: parseInt(matches[3])
+              };
+              const adjusted = adjustBrightness(rgb, factor, true);
+              newColorCode = `\\033[38;2;${adjusted.r};${adjusted.g};${adjusted.b}m`;
+            } else {
+              return match; // Unknown ANSI format
+            }
+          } else if (match.startsWith("$X") && match.length === 8) {
+            // Handle $X truecolor format
+            const hex = match.slice(2);
+            rgb = {
+              r: parseInt(hex.slice(0, 2), 16),
+              g: parseInt(hex.slice(2, 4), 16),
+              b: parseInt(hex.slice(4, 6), 16)
+            };
+            const adjusted = adjustBrightness(rgb, factor, true); // Use precise adjustment for truecolor
+            newColorCode = '$X' + toHex(adjusted.r) + toHex(adjusted.g) + toHex(adjusted.b);
+          } else if ((match.startsWith("$x") || match.startsWith("@x") || match.startsWith("{x")) && match.length === 5) {
+            // Handle xterm color codes using proper xterm adjustment
+            const idx = parseInt(match.slice(2), 10);
+            const newIdx = adjustXtermColor(idx, factor > 0);
+            newColorCode = match.slice(0, 2) + String(newIdx).padStart(3, "0");
+          } else if ((match.startsWith("@[F") && match.endsWith("]")) ||
+                     (match.startsWith("\\t[F") && match.endsWith("]")) ||
+                     (match.startsWith("^[F") && match.endsWith("]"))) {
+            // Handle F-color codes - they represent 6x6x6 cube colors
+            const inside = match.includes("\\t") ? match.slice(3, -1) : match.slice(2, -1);
+            const r = parseInt(inside.charAt(1), 10);
+            const g = parseInt(inside.charAt(2), 10);
+            const b = parseInt(inside.charAt(3), 10);
+            const colorIndex = 16 + 36 * r + 6 * g + b;
+            
+            // Use proper xterm adjustment
+            const newIdx = adjustXtermColor(colorIndex, factor > 0);
+            
+            // Convert back to F-color format
+            if (newIdx >= 16 && newIdx <= 231) {
+              const base = newIdx - 16;
+              const newR = Math.floor(base / 36) % 6;
+              const newG = Math.floor(base / 6) % 6;
+              const newB = base % 6;
+              if (match.startsWith("\\t")) {
+                newColorCode = `\\t[F${newR}${newG}${newB}]`;
+              } else if (match.startsWith("^")) {
+                newColorCode = `^[F${newR}${newG}${newB}]`;
+              } else {
+                newColorCode = `@[F${newR}${newG}${newB}]`;
+              }
+            } else {
+              return match; // Can't convert, keep original
+            }
+          } else if ((match.startsWith("&") || match.startsWith("{")) && match.match(/^\D\d{3}$/)) {
+            // Handle &NNN or {NNN format using proper xterm adjustment
+            const idx = parseInt(match.slice(1), 10);
+            const newIdx = adjustXtermColor(idx, factor > 0);
+            newColorCode = match.charAt(0) + String(newIdx).padStart(3, "0");
+          } else {
+            return match; // Unknown format, keep original
+          }
+          
+          return newColorCode;
+        });
+      }
+
+      // Instant brightness adjustment event listeners
+      document.getElementById("instantLighterButton").addEventListener("click", function() {
+        const copyableOutput = document.getElementById("copyableOutput");
+        const currentText = copyableOutput.value;
+        
+        if (!currentText) {
+          alert("No colored text to adjust!");
+          return;
+        }
+        
+        // Adjust brightness of all color codes in the text (5% increments for finer control)
+        const adjustedText = adjustTextBrightness(currentText, 5);
+        
+        // Debug: Check if anything changed
+        if (adjustedText === currentText) {
+          console.log("Warning: No color codes were adjusted. Input:", currentText);
+        }
+        
+        // Update the copyable output
+        copyableOutput.value = adjustedText;
+        
+        // Update the preview
+        updateOutput(adjustedText);
+      });
+
+      document.getElementById("instantDarkerButton").addEventListener("click", function() {
+        const copyableOutput = document.getElementById("copyableOutput");
+        const currentText = copyableOutput.value;
+        
+        if (!currentText) {
+          alert("No colored text to adjust!");
+          return;
+        }
+        
+        // Adjust brightness of all color codes in the text (5% increments for finer control)
+        const adjustedText = adjustTextBrightness(currentText, -5);
+        
+        // Update the copyable output
+        copyableOutput.value = adjustedText;
+        
+        // Update the preview
+        updateOutput(adjustedText);
       });
 
       initialize();
